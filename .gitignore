@@ -1,0 +1,45 @@
+# === 1. 编译产物 (Build Artifacts) ===
+build/
+bin/
+lib/
+out/
+*.o
+*.obj
+*.a
+*.so
+*.out
+server
+
+# === 2. Conan 生成文件 (Conan Generated) ===
+conanbuildinfo.cmake
+conan_toolchain.cmake
+conandeps.cmake
+*.cmake
+CMakeUserPresets.json
+
+# === 3. CMake 临时文件 ===
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# === 4. 日志与临时文件 (Logs & Temp) ===
+*.log
+*_ServerLog
+temp/
+tmp/
+*.swp
+*.patch
+
+# === 5. IDE 配置 (IDE Specific) ===
+.vscode/
+.idea/
+.vs/
+*.sublime-project
+*.sublime-workspace
+
+# === 6. 操作系统相关 (OS Specific) ===
+.DS_Store
+Thumbs.db
