@@ -8,23 +8,7 @@ WebServer::WebServer()
     //http_conn类对象
     users = new http_conn[MAX_FD];
 
-    // 获取当前可执行文件的绝对物理路径
-    char exe_path[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", exe_path, PATH_MAX);
-    
-    // readlink 不会自动加上字符串结束符，需要手动加
-    if (count > 0) {
-        exe_path[count] = '\0';
-    } else {
-        // 如果获取失败，直接向终端输出错误信息并终止程序
-        perror("Fatal Error: 无法获取可执行文件绝对路径 (readlink failed)");
-        exit(1); 
-    }
-
-    std::string full_path(exe_path);
-    // 找到最后一个 '/'，切掉 "server" 文件名，只保留目录
-    size_t last_slash = full_path.find_last_of('/');
-    std::string base_dir = full_path.substr(0, last_slash);
+    std::string base_dir = get_executable_path();
     
     // 拼接旁边的 root 文件夹 (注意：经过 CMake 同步后，root 就在可执行文件旁边)
     std::string root_dir = base_dir + "/root";

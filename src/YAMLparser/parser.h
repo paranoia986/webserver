@@ -1,18 +1,13 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef PARSER_H
+#define PARSER_H
 
-#include "webserver.h"
+#include <string>
+#include <yaml-cpp/yaml.h>
+#include "../webserver.h"
 
-using namespace std;
-
-class Config
-{
+class app_config {
 public:
-    Config();
-    ~Config(){};
-
-    void parse_arg(int argc, char*argv[]);
-
+    // Server
     //端口号
     int PORT;
 
@@ -42,6 +37,17 @@ public:
 
     //并发模型选择
     int actor_model;
+
+    // Database
+    std::string user;
+
+    std::string password;
+
+    std::string name;
+
+    app_config(const std::string& filename);
+    ~app_config() {};
+    void parse_arg(int argc, char*argv[]);
 };
 
 #endif

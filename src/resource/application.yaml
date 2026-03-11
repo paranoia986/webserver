@@ -1,0 +1,16 @@
+server:
+    PORT: 9006           # 自定义端口号
+    LOGWrite: 0          # 0,同步写入; 1,异步写入
+    TRIGMode: 0          # 0,LT+LT; 1,LT+ET; 2,ET+LT; 3,ET+ET (后两者组合模式)
+    LISTENTrigmode: 0    # listenfd触发模式，默认LT
+    CONNTrigmode: 0      # connfd触发模式，默认LT
+    OPT_LINGER: 0        # 关闭链接;0,不开启; 1,开启
+    sql_num: 8           # 数据库连接池数量,默认8
+    thread_num: 8        # 线程池内的线程数量,默认8
+    close_log: 0         # 0,开启日志; 1,关闭日志
+    actor_model: 0       # 0,proactor; 1,reactor
+
+database:
+    user: "root"
+    password: "your_password"
+    name: "your_database_name"

@@ -1,20 +1,19 @@
-#include "config.h"
+#include "YAMLparser/parser.h"
 
 int main(int argc, char *argv[])
 {
-    //需要修改的数据库信息,登录名,密码,库名
-    string user = "root";
-    string passwd = "ztm041027";
-    string databasename = "tiny_web_server";
+    std::string base_path = get_executable_path();
+    std::string config_path = base_path + "/resource/application.yaml";
+    
+    app_config config(config_path);
 
     //命令行解析
-    Config config;
     config.parse_arg(argc, argv);
 
     WebServer server;
 
     //初始化
-    server.init(config.PORT, user, passwd, databasename, config.LOGWrite, 
+    server.init(config.PORT, config.user, config.password, config.name, config.LOGWrite, 
                 config.OPT_LINGER, config.TRIGMode,  config.sql_num,  config.thread_num, 
                 config.close_log, config.actor_model);
     
