@@ -12,5 +12,5 @@ server:
 
 database:
     user: "root"
-    password: "your_password"
-    name: "your_database_name"
+    password: "password"
+    name: "database_name"

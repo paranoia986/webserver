@@ -7,6 +7,9 @@
 
 class sem
 {
+private:
+    sem_t m_sem;
+
 public:
     sem()
     {
@@ -34,12 +37,15 @@ public:
     {
         return sem_post(&m_sem) == 0;
     }
-
-private:
-    sem_t m_sem;
 };
+
+/******************************************************************/
+
 class locker
 {
+private:
+    pthread_mutex_t m_mutex;
+
 public:
     locker()
     {
@@ -64,12 +70,16 @@ public:
     {
         return &m_mutex;
     }
-
-private:
-    pthread_mutex_t m_mutex;
 };
+
+/******************************************************************/
+
 class cond
 {
+private:
+    //static pthread_mutex_t m_mutex;
+    pthread_cond_t m_cond;
+
 public:
     cond()
     {
@@ -107,9 +117,6 @@ public:
     {
         return pthread_cond_broadcast(&m_cond) == 0;
     }
-
-private:
-    //static pthread_mutex_t m_mutex;
-    pthread_cond_t m_cond;
 };
+
 #endif

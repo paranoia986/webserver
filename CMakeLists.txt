@@ -32,19 +32,8 @@ target_link_libraries(server PRIVATE
     yaml-cpp::yaml-cpp
 )
 
-add_custom_command(TARGET server POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/src/root"
-    "$<TARGET_FILE_DIR:server>/root"
-    COMMENT "正在同步网页资源到输出目录..."
-)
-
-add_custom_command(TARGET server POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/src/resource"
-    "$<TARGET_FILE_DIR:server>/resource"
-    COMMENT "正在同步配置文件到输出目录..."
-)
+file(COPY "${CMAKE_SOURCE_DIR}/src/root" DESTINATION "${CMAKE_BINARY_DIR}")
+file(COPY "${CMAKE_SOURCE_DIR}/src/resource" DESTINATION "${CMAKE_BINARY_DIR}")
 
 install(TARGETS server DESTINATION "."
         RUNTIME DESTINATION bin

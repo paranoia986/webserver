@@ -11,25 +11,23 @@ This project wants to be inited , tested , pacakage managed and built by conan a
 
 ## Principles
 
-1. should print the realtime information for the each mod and step being executed. 
+1. should print the realtime information for the each mod and step being executed.
 
 ## Mods
 
-1.  mysql
-2.  http
-3.  https (to be implemented)
-4.  lock
-5.  threadpool
-6.  log
-7.  root(root resources)
-8.  timer
-9.  webserver
+1. mysql
+2. http
+3. https (to be implemented)
+4. lock
+5. threadpool
+6. log
+7. root(root resources)
+8. timer
+9. webserver
 10. config parser(to be implemented)
 
 ## plans to be done
 
-1. move config info into files (like config.yaml)
-2. add test for each mod
+1. add test for each mod
 3. add the different functions for mysql
-.etc
-
+   .etc
