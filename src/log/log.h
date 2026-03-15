@@ -12,6 +12,20 @@ using namespace std;
 
 class Log
 {
+private:
+    char dir_name[128];                 //路径名
+    char log_name[128];                 //log文件名
+    int m_split_lines;                  //日志最大行数
+    int m_log_buf_size;                 //日志缓冲区大小
+    long long m_count;                  //日志行数记录
+    int m_today;                        //因为按天分类,记录当前时间是那一天
+    FILE *m_fp;                         //打开log的文件指针 
+    char *m_buf;                        //日志缓冲区
+    block_queue<string> *m_log_queue;   //阻塞队列
+    bool m_is_async;                    //是否同步标志位
+    locker m_mutex;                     //互斥锁
+    int m_close_log;                    //关闭日志
+
 public:
     //C++11以后,使用局部变量不用加锁
     static Log *get_instance()
@@ -44,21 +58,8 @@ private:
             fputs(single_log.c_str(), m_fp);
             m_mutex.unlock();
         }
+        return NULL;
     }
-
-private:
-    char dir_name[128]; //路径名
-    char log_name[128]; //log文件名
-    int m_split_lines;  //日志最大行数
-    int m_log_buf_size; //日志缓冲区大小
-    long long m_count;  //日志行数记录
-    int m_today;        //因为按天分类,记录当前时间是那一天
-    FILE *m_fp;         //打开log的文件指针
-    char *m_buf;
-    block_queue<string> *m_log_queue; //阻塞队列
-    bool m_is_async;                  //是否同步标志位
-    locker m_mutex;
-    int m_close_log; //关闭日志
 };
 
 #define LOG_DEBUG(format, ...) if(0 == m_close_log) {Log::get_instance()->write_log(0, format, ##__VA_ARGS__); Log::get_instance()->flush();}

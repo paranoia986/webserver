@@ -55,12 +55,13 @@ public:
 
     ~block_queue() {
         m_mutex.lock();
-        m_close = true;  
-        m_cond.broadcast();   // 强行叫醒所有还在睡觉的 pop 线程
+        
+        // 核心职责：只负责回收底层数组的内存
         if (m_array != NULL){
             delete [] m_array;
             m_array = NULL;
         }
+        
         m_mutex.unlock();
     }
 
@@ -242,6 +243,14 @@ public:
         m_size--;
         m_mutex.unlock();
         return true;
+    }
+
+    void close_queue()
+    {
+        m_mutex.lock();
+        m_close = true;         // 设为关闭状态
+        m_cond.broadcast();     // 广播！叫醒所有正在 pop 里 wait 的线程
+        m_mutex.unlock();
     }
 
 };

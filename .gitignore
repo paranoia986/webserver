@@ -32,6 +32,7 @@ temp/
 tmp/
 *.swp
 *.patch
+valgrind*
 
 # === 5. IDE 配置 (IDE Specific) ===
 .vscode/

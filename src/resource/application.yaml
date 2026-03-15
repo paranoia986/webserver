@@ -12,5 +12,5 @@ server:
 
 database:
     user: "root"
-    password: "password"
-    name: "database_name"
+    password: "ztm041027"
+    name: "tiny_web_server"

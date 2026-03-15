@@ -1,22 +1,56 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <stdarg.h>
 #include "log.h"
 #include <pthread.h>
+#include "../utils/path_util.h"
 using namespace std;
 
 Log::Log()
 {
     m_count = 0;
     m_is_async = false;
+    m_close_log = 1; 
+    m_fp = NULL;
+    m_buf = NULL;
+    m_log_queue = NULL;
 }
 
 Log::~Log()
 {
+    // 安全停掉后台的异步写入线程
+    // 必须在释放队列内存之前做！
+    if (m_is_async && m_log_queue != NULL)
+    {
+        // 告诉队列要关闭了，并叫醒正在等待的后台线程
+        m_log_queue->close_queue();
+        
+        // 延时 1 毫秒 (1000 微秒)
+        // 极其重要：给后台线程一点点时间，让它把 pop 函数里的 return false 走完，结束线程的 while 循环
+        usleep(1000); 
+    }
+
+    // 关闭文件描述符
     if (m_fp != NULL)
     {
         fclose(m_fp);
+    }
+
+    // 释放字符串缓冲区内存 (修复内存泄漏)
+    if (m_buf != NULL)
+    {
+        delete[] m_buf;
+        m_buf = NULL; // 释放后置空是 C++ 的好习惯
+    }
+
+    // 释放阻塞队列内存
+    // 此时后台线程已经退出了，delete 它是绝对安全的
+    if (m_log_queue != NULL)
+    {
+        delete m_log_queue;
+        m_log_queue = NULL;
     }
 }
 //异步需要设置阻塞队列的长度，同步不需要设置
@@ -42,26 +76,40 @@ bool Log::init(const char *file_name, int close_log, int log_buf_size, int split
     struct tm *sys_tm = localtime(&t);
     struct tm my_tm = *sys_tm;
 
- 
-    const char *p = strrchr(file_name, '/');
-    char log_full_name[256] = {0};
+    // 获取程序运行的绝对路径
+    std::string base_path = get_executable_path();
+    
+    // 拼接专属的日志文件夹路径，注意末尾带上 '/'
+    std::string log_dir = base_path + "/ServerLog/";
+    
+    // 自动创建该文件夹（0777为最高权限，若已存在则返回-1，不影响程序）
+    mkdir(log_dir.c_str(), 0777);
 
-    if (p == NULL)
-    {
-        snprintf(log_full_name, 255, "%d_%02d_%02d_%s", my_tm.tm_year + 1900, my_tm.tm_mon + 1, my_tm.tm_mday, file_name);
-    }
-    else
-    {
-        strcpy(log_name, p + 1);
-        strncpy(dir_name, file_name, p - file_name + 1);
-        snprintf(log_full_name, 255, "%s%d_%02d_%02d_%s", dir_name, my_tm.tm_year + 1900, my_tm.tm_mon + 1, my_tm.tm_mday, log_name);
-    }
+    // 将目录名和文件名分别保存到 Log 类的成员变量中
+    // (这是为了后续 write_log 按天翻滚生成新文件时，依然能找到这个目录)
+    strncpy(dir_name, log_dir.c_str(), sizeof(dir_name) - 1);
+    dir_name[sizeof(dir_name) - 1] = '\0';
+    
+    strncpy(log_name, file_name, sizeof(log_name) - 1);
+    log_name[sizeof(log_name) - 1] = '\0';
+
+    // 拼接当天第一次打开的完整绝对路径日志文件名
+    char log_full_name[512] = {0};
+    snprintf(log_full_name, 511, "%s%d_%02d_%02d_%s", 
+             dir_name, 
+             my_tm.tm_year + 1900, 
+             my_tm.tm_mon + 1, 
+             my_tm.tm_mday, 
+             log_name);
 
     m_today = my_tm.tm_mday;
     
+    // 追加模式打开文件
     m_fp = fopen(log_full_name, "a");
     if (m_fp == NULL)
     {
+        // 增加 perror 方便调试：如果没打开，会在终端告诉你为什么（比如权限不够）
+        perror("Log Init Failed: 无法打开日志文件");
         return false;
     }
 
@@ -140,6 +188,15 @@ void Log::write_log(int level, const char *format, ...)
     log_str = m_buf;
 
     m_mutex.unlock();
+
+    if (level == 2 || level == 3) 
+    {
+        // 使用 ANSI 颜色码：Warn 为黄色 (\033[33m)，Error 为红色 (\033[31m)
+        if (level == 2) 
+            printf("\033[33m%s\033[0m", log_str.c_str());
+        else if (level == 3)
+            fprintf(stderr, "\033[31m%s\033[0m", log_str.c_str()); // Error 通常输出到 stderr
+    }
 
     if (m_is_async && !m_log_queue->full())
     {
