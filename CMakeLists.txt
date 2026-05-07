@@ -25,11 +25,13 @@ target_include_directories(server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 find_package(Threads REQUIRED)
 find_package(libmysqlclient REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(liburing REQUIRED)
 
 target_link_libraries(server PRIVATE 
     Threads::Threads 
     libmysqlclient::libmysqlclient
     yaml-cpp::yaml-cpp
+    liburing::liburing
 )
 
 file(COPY "${CMAKE_SOURCE_DIR}/src/root" DESTINATION "${CMAKE_BINARY_DIR}")

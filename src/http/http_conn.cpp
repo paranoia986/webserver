@@ -45,6 +45,8 @@ void http_conn::initmysql_result(connection_pool *connPool)
         string temp2(row[1]);
         users[temp1] = temp2;
     }
+
+    mysql_free_result(result);
 }
 
 //对文件描述符设置非阻塞
@@ -103,6 +105,7 @@ void http_conn::close_conn(bool real_close)
     if (real_close && (m_sockfd != -1))
     {
         printf("close %d\n", m_sockfd);
+        unmap();
         removefd(m_epollfd, m_sockfd);
         m_sockfd = -1;
         m_user_count--;
@@ -116,12 +119,14 @@ void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, int TRIGMo
     m_sockfd = sockfd;
     m_address = addr;
 
+    m_TRIGMode = TRIGMode;
+
     addfd(m_epollfd, sockfd, true, m_TRIGMode);
     m_user_count++;
 
     //当浏览器出现连接重置时，可能是网站根目录出错或http响应格式出错或者访问的文件中内容完全为空
     doc_root = root;
-    m_TRIGMode = TRIGMode;
+    
     m_close_log = close_log;
 
     strcpy(sql_user, user.c_str());
@@ -444,6 +449,7 @@ http_conn::HTTP_CODE http_conn::do_request()
             }
             else
                 strcpy(m_url, "/registerError.html");
+            free(sql_insert);
         }
         //如果是登录，直接判断
         //若浏览器端输入的用户名和密码在表中可以查找到，返回1，否则返回0

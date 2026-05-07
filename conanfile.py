@@ -24,7 +24,9 @@ class webserverRecipe(ConanFile):
         self.requires("libmysqlclient/8.0.31")
         # 添加 yaml-cpp 依赖
         self.requires("yaml-cpp/0.8.0")
-
+        # 添加 liburing 依赖
+        self.requires("liburing/2.6")
+        
     def layout(self):
         cmake_layout(self)
 

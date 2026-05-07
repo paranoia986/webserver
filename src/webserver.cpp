@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <string>
+#include <liburing.h>
 
 WebServer::WebServer()
 {
@@ -30,6 +31,7 @@ WebServer::~WebServer()
     delete[] users;
     delete[] users_timer;
     delete m_pool;
+    free(m_root);
 }
 
 void WebServer::init(int port, string user, string passWord, string databaseName, int log_write, 
@@ -154,6 +156,7 @@ void WebServer::eventListen()
     utils.addsig(SIGPIPE, SIG_IGN);
     utils.addsig(SIGALRM, utils.sig_handler, false);
     utils.addsig(SIGTERM, utils.sig_handler, false);
+    utils.addsig(SIGINT, utils.sig_handler, false);
 
     alarm(TIMESLOT);
 
@@ -270,9 +273,28 @@ bool WebServer::dealwithsignal(bool &timeout, bool &stop_server)
                 timeout = true;
                 break;
             }
+            case SIGINT:
             case SIGTERM:
             {
-                stop_server = true;
+                alarm(0); // 取消闹钟，防止在确认期间定时器失效
+
+                printf("\n\033\n[1;33m[Confirm] Are you sure you want to shut down the server? (y/n): \033[0m");
+                fflush(stdout); // 确保提示语立即显示在终端
+
+                char choice;
+                // 读取用户输入，注意前面的空格是为了跳过换行符
+                if (scanf(" %c", &choice) == 1 && (choice == 'y' || choice == 'Y')) 
+                {
+                    stop_server = true;
+                    printf("\033\n[1;32m[System] Shutting down gracefully...\033[0m\n");
+                } 
+                else 
+                {
+                    stop_server = false;
+                    printf("\033\n[1;36m[System] Shutdown cancelled. Server continues running.\033[0m\n");
+                    // 重新开启闹钟，防止在确认期间定时器失效
+                    alarm(TIMESLOT); 
+                }
                 break;
             }
             }

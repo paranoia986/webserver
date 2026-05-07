@@ -1,4 +1,5 @@
 #include "YAMLparser/parser.h"
+#include <mysql/mysql.h>
 
 int main(int argc, char *argv[])
 {
@@ -41,5 +42,7 @@ int main(int argc, char *argv[])
     //运行
     server.eventLoop();
 
+    mysql_library_end(); // 释放 MySQL 库资源
+    
     return 0;
 }
