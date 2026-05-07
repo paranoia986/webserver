@@ -92,7 +92,7 @@ void WebServer::sql_pool()
 {
     //初始化数据库连接池
     m_connPool = connection_pool::GetInstance();
-    m_connPool->init("127.0.0.1", m_user, m_passWord, m_databaseName, 3306, m_sql_num, m_close_log);
+    m_connPool->init("/run/mysqld/mysqld.sock", m_user, m_passWord, m_databaseName, m_sql_num, m_close_log);
 
     //初始化数据库读取表
     users->initmysql_result(m_connPool);

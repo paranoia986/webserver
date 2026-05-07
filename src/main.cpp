@@ -33,6 +33,11 @@ int main(int argc, char *argv[])
     //监听
     server.eventListen();
 
+    std::cout << "\033[1;32m==============================================\033[0m" << std::endl;
+    std::cout << "\033[1;32m   WebServer started successfully!            \033[0m" << std::endl;
+    std::cout << "\033[1;36m   Local:   http://127.0.0.1:" << config.PORT << " \033[0m" << std::endl;
+    std::cout << "\033[1;32m==============================================\033[0m" << std::endl;
+
     //运行
     server.eventLoop();
 

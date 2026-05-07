@@ -22,7 +22,7 @@ connection_pool *connection_pool::GetInstance()
 	return &connPool;
 }
 
-//构造初始化
+// 构造 TCP/IP 连接初始化
 void connection_pool::init(string url, string User, string PassWord, string DBName, int Port, int MaxConn, int close_log)
 {
 	m_url = url;
@@ -58,6 +58,40 @@ void connection_pool::init(string url, string User, string PassWord, string DBNa
 	m_MaxConn = m_FreeConn;
 }
 
+// 构造 unix socket 连接初始
+void connection_pool::init(string sock, string User, string PassWord, string DBName, int MaxConn, int close_log)
+{
+	m_Sock = sock;
+	m_User = User;
+	m_PassWord = PassWord;
+	m_DatabaseName = DBName;
+	m_close_log = close_log;
+
+	for (int i = 0; i < MaxConn; i++)
+	{
+		MYSQL *con = NULL;
+		con = mysql_init(con);
+
+		if (con == NULL)
+		{
+			LOG_ERROR("MySQL Error: mysql_init");
+			exit(1);
+		}
+		
+		con = mysql_real_connect(con, "localhost", User.c_str(), PassWord.c_str(), DBName.c_str(), 0, sock.c_str(), 0);
+
+		if (con == NULL)
+		{
+			LOG_ERROR("MySQL Error: mysql_real_connect by Unix Socket");
+			exit(1);
+		}
+		connList.push_back(con);
+		++m_FreeConn;
+	}
+
+	reserve = sem(m_FreeConn);
+	m_MaxConn = m_FreeConn;
+}
 
 //当有请求时，从数据库连接池中返回一个可用连接，更新使用和空闲连接数
 MYSQL *connection_pool::GetConnection()
