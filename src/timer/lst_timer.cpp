@@ -159,6 +159,7 @@ int Utils::setnonblocking(int fd)
     return old_option;
 }
 
+#if !IO_URING
 //将内核事件表注册读事件，ET模式，选择开启EPOLLONESHOT
 void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 {
@@ -175,6 +176,7 @@ void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
     setnonblocking(fd);
 }
+#endif // !IO_URING
 
 //信号处理函数
 void Utils::sig_handler(int sig)
@@ -202,7 +204,9 @@ void Utils::addsig(int sig, void(handler)(int), bool restart)
 void Utils::timer_handler()
 {
     m_timer_lst.tick();
+#if !IO_URING
     alarm(m_TIMESLOT);
+#endif
 }
 
 void Utils::show_error(int connfd, const char *info)
@@ -212,12 +216,18 @@ void Utils::show_error(int connfd, const char *info)
 }
 
 int *Utils::u_pipefd = 0;
+#if IO_URING
+struct io_uring *Utils::u_ring = nullptr;
+#else
 int Utils::u_epollfd = 0;
+#endif
 
 class Utils;
 void cb_func(client_data *user_data)
 {
+#if !IO_URING
     epoll_ctl(Utils::u_epollfd, EPOLL_CTL_DEL, user_data->sockfd, 0);
+#endif
     assert(user_data);
     close(user_data->sockfd);
     http_conn::m_user_count--;

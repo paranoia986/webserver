@@ -12,6 +12,10 @@
 #include <cassert>
 #include <sys/epoll.h>
 
+#if IO_URING
+#include <liburing.h>
+#endif
+
 #include "./threadpool/threadpool.h"
 #include "./http/http_conn.h"
 #include "utils/path_util.h"
@@ -31,7 +35,13 @@ public:
     int m_actormodel;
 
     int m_pipefd[2];
+
+#if IO_URING
+    struct io_uring ring;               // io_uring 实例（替换 epollfd + events）
+#else
     int m_epollfd;
+#endif
+
     http_conn *users;
 
     //数据库相关
@@ -45,8 +55,10 @@ public:
     threadpool<http_conn> *m_pool;
     int m_thread_num;
 
-    //epoll_event相关
+#if !IO_URING
+    //epoll_event相关（仅 epoll 模式需要）
     epoll_event events[MAX_EVENT_NUMBER];
+#endif
 
     int m_listenfd;
     int m_OPT_LINGER;
@@ -57,6 +69,21 @@ public:
     //定时器相关
     client_data *users_timer;
     Utils utils;
+
+#if IO_URING
+private:
+    // ── io_uring 辅助方法 ──
+    void submit_accept_sqe();
+    void submit_recv_sqe(int fd);
+    void submit_writev_sqe(int fd);
+    void submit_close_sqe(int fd);
+    void submit_timeout_sqe();
+    void submit_signal_recv_sqe();
+    void handle_write_completion(int fd, int bytes_sent);
+    void handle_signal_completion(int sig_count, bool &stop_server);
+
+    char m_signal_buf[1024];     // 信号管道 io_uring recv 缓冲区
+#endif
 
 public:
     WebServer();

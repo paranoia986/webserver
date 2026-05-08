@@ -58,6 +58,7 @@ int setnonblocking(int fd)
     return old_option;
 }
 
+#if !IO_URING
 //将内核事件表注册读事件，ET模式，选择开启EPOLLONESHOT
 void addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 {
@@ -95,21 +96,47 @@ void modfd(int epollfd, int fd, int ev, int TRIGMode)
 
     epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
 }
+#endif // !IO_URING
 
 int http_conn::m_user_count = 0;
+#if IO_URING
+struct io_uring *http_conn::ring = nullptr;
+#else
 int http_conn::m_epollfd = -1;
+#endif
 
 //关闭连接，关闭一个连接，客户总量减一
 void http_conn::close_conn(bool real_close)
 {
-    if (real_close && (m_sockfd != -1))
+    if (!real_close || m_sockfd == -1) return;
+
+#if IO_URING
+    // io_uring 路径：提交异步 close SQE
+    printf("close %d\n", m_sockfd);
+    unmap();
+
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    if (sqe)
     {
-        printf("close %d\n", m_sockfd);
-        unmap();
-        removefd(m_epollfd, m_sockfd);
-        m_sockfd = -1;
+        io_uring_prep_close(sqe, m_sockfd);
+        io_uring_sqe_set_data64(sqe, make_user_data(m_sockfd, OP_CLOSE));
+        m_uring_state = OP_CLOSE;
+        io_uring_submit(ring);
+    }
+    else
+    {
+        // ring 满，回退同步关闭
+        close(m_sockfd);
         m_user_count--;
     }
+    // 不在此处改 m_sockfd = -1，留给 CQE 处理
+#else
+    printf("close %d\n", m_sockfd);
+    unmap();
+    removefd(m_epollfd, m_sockfd);
+    m_sockfd = -1;
+    m_user_count--;
+#endif
 }
 
 //初始化连接,外部调用初始化套接字地址
@@ -121,7 +148,11 @@ void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, int TRIGMo
 
     m_TRIGMode = TRIGMode;
 
+#if IO_URING
+    m_uring_state = 0;
+#else
     addfd(m_epollfd, sockfd, true, m_TRIGMode);
+#endif
     m_user_count++;
 
     //当浏览器出现连接重置时，可能是网站根目录出错或http响应格式出错或者访问的文件中内容完全为空
@@ -198,6 +229,7 @@ http_conn::LINE_STATUS http_conn::parse_line()
     return LINE_OPEN;
 }
 
+#if !IO_URING
 //循环读取客户数据，直到无数据可读或对方关闭连接
 //非阻塞ET工作模式下，需要一次性将数据读完
 bool http_conn::read_once()
@@ -242,6 +274,7 @@ bool http_conn::read_once()
         return true;
     }
 }
+#endif // !IO_URING
 
 //解析http请求行，获得请求方法，目标url及http版本号
 http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
@@ -527,6 +560,7 @@ void http_conn::unmap()
         m_file_address = 0;
     }
 }
+#if !IO_URING
 bool http_conn::write()
 {
     int temp = 0;
@@ -584,6 +618,7 @@ bool http_conn::write()
         }
     }
 }
+#endif // !IO_URING
 bool http_conn::add_response(const char *format, ...)
 {
     if (m_write_idx >= WRITE_BUFFER_SIZE)
@@ -694,6 +729,51 @@ bool http_conn::process_write(HTTP_CODE ret)
 void http_conn::process()
 {
     HTTP_CODE read_ret = process_read();
+
+#if IO_URING
+    // ── io_uring 路径 ──
+    if (read_ret == NO_REQUEST)
+    {
+        // 需要更多数据 → 重新提交 recv SQE
+        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        if (sqe)
+        {
+            io_uring_prep_recv(sqe, m_sockfd, m_read_buf + m_read_idx,
+                               READ_BUFFER_SIZE - m_read_idx, 0);
+            io_uring_sqe_set_data64(sqe, make_user_data(m_sockfd, OP_RECV));
+            m_uring_state = OP_RECV;
+            io_uring_submit(ring);
+        }
+        return;
+    }
+
+    bool write_ret = process_write(read_ret);
+    if (!write_ret)
+    {
+        // 响应构建失败 → 提交异步 close
+        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        if (sqe)
+        {
+            io_uring_prep_close(sqe, m_sockfd);
+            io_uring_sqe_set_data64(sqe, make_user_data(m_sockfd, OP_CLOSE));
+            m_uring_state = OP_CLOSE;
+            io_uring_submit(ring);
+        }
+        return;
+    }
+
+    // 提交异步 writev，然后 io_uring 事件循环负责收割 CQE
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    if (sqe)
+    {
+        io_uring_prep_writev(sqe, m_sockfd, m_iv, m_iv_count, 0);
+        io_uring_sqe_set_data64(sqe, make_user_data(m_sockfd, OP_WRITE));
+        m_uring_state = OP_WRITE;
+        io_uring_submit(ring);
+    }
+
+#else
+    // ── epoll 路径（原有代码）──
     if (read_ret == NO_REQUEST)
     {
         modfd(m_epollfd, m_sockfd, EPOLLIN, m_TRIGMode);
@@ -705,4 +785,5 @@ void http_conn::process()
         close_conn();
     }
     modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
+#endif
 }

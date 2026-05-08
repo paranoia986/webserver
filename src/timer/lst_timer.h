@@ -24,6 +24,10 @@
 #include <time.h>
 #include "../log/log.h"
 
+#if IO_URING
+#include <liburing.h>
+#endif
+
 class util_timer;
 
 struct client_data
@@ -93,7 +97,13 @@ public:
 public:
     static int *u_pipefd;
     sort_timer_lst m_timer_lst;
+
+#if IO_URING
+    static struct io_uring *u_ring;    // 指向 WebServer 的 io_uring 实例
+#else
     static int u_epollfd;
+#endif
+
     int m_TIMESLOT;
 };
 

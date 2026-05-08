@@ -115,6 +115,12 @@ void threadpool<T>::run()
             continue;
         if (1 == m_actor_model)
         {
+#if IO_URING
+            // io_uring 模式：reactor 的 read_once/write 已被移除，
+            // 直接走 proactor 路径
+            connectionRAII mysqlcon(&request->mysql, m_connPool);
+            request->process();
+#else
             if (0 == request->m_state)
             {
                 if (request->read_once())
@@ -141,6 +147,7 @@ void threadpool<T>::run()
                     request->timer_flag = 1;
                 }
             }
+#endif
         }
         else
         {

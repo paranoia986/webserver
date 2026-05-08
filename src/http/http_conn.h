@@ -20,14 +20,36 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <map>
+#if IO_URING == 1
+    #include <liburing.h>
+#endif
 
 #include "../lock/locker.h"
 #include "../CGImysql/sql_connection_pool.h"
 #include "../timer/lst_timer.h"
 #include "../log/log.h"
 
+// io_uring 操作类型枚举 —— 编码在 cqe->user_data 低 32 位
+// （定义在 http_conn.h 以便 webserver.cpp 和 http_conn.cpp 共享）
+enum ConnOp : unsigned {
+    OP_ACCEPT  = 0,   // 接受新连接
+    OP_RECV    = 1,   // 读取客户端数据
+    OP_WRITE   = 2,   // 发送响应数据
+    OP_CLOSE   = 3,   // 关闭连接
+    OP_TIMEOUT = 4,   // 定时器超时
+    OP_SIGNAL  = 5,   // 信号管道可读
+};
+
+// 辅助函数：打包/拆解 cqe->user_data
+inline unsigned long long make_user_data(int fd, ConnOp op) {
+    return ((unsigned long long)fd << 32) | (unsigned long long)op;
+}
+inline int  get_fd_from_user_data(unsigned long long data) { return (int)(data >> 32); }
+inline ConnOp get_op_from_user_data(unsigned long long data) { return (ConnOp)(data & 0xFFFFFFFF); }
+
 class http_conn
 {
+    friend class WebServer;  // io_uring 模式下 WebServer 需要访问私有成员
 public:
     static const int FILENAME_LEN = 200;
     static const int READ_BUFFER_SIZE = 2048;
@@ -108,13 +130,20 @@ private:
     bool add_blank_line();
 
 public:
+#if IO_URING
+    static struct io_uring *ring;         // 指向 WebServer 的 io_uring 实例
+#else
     static int m_epollfd;
+#endif
     static int m_user_count;
     MYSQL *mysql;
     int m_state;  //读为0, 写为1
 
 private:
     int m_sockfd;
+#if IO_URING
+    int m_uring_state;   // 当前 pending 的 io_uring 操作 (ConnOp), 0=空闲
+#endif
     sockaddr_in m_address;
     char m_read_buf[READ_BUFFER_SIZE];
     long m_read_idx;

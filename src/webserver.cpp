@@ -2,7 +2,9 @@
 #include <unistd.h>
 #include <limits.h>
 #include <string>
-#include <liburing.h>
+#if IO_URING == 1
+    #include <liburing.h>
+#endif
 
 WebServer::WebServer()
 {
@@ -24,7 +26,11 @@ WebServer::WebServer()
 
 WebServer::~WebServer()
 {
+#if IO_URING
+    io_uring_queue_exit(&ring);
+#else
     close(m_epollfd);
+#endif
     close(m_listenfd);
     close(m_pipefd[1]);
     close(m_pipefd[0]);
@@ -140,7 +146,37 @@ void WebServer::eventListen()
 
     utils.init(TIMESLOT);
 
-    //epoll创建内核事件表
+#if IO_URING
+    // ── io_uring 初始化 ──
+    struct io_uring_params params;
+    memset(&params, 0, sizeof(params));
+    ret = io_uring_queue_init_params(256, &ring, &params);
+    assert(ret >= 0);
+
+    // 设置全局 ring 指针（http_conn / Utils 均通过静态指针访问）
+    http_conn::ring = &ring;
+    Utils::u_ring   = &ring;
+
+    // 信号管道
+    ret = socketpair(PF_UNIX, SOCK_STREAM, 0, m_pipefd);
+    assert(ret != -1);
+    utils.setnonblocking(m_pipefd[1]);
+    utils.setnonblocking(m_pipefd[0]);
+
+    utils.addsig(SIGPIPE, SIG_IGN);
+    utils.addsig(SIGALRM, utils.sig_handler, false);
+    utils.addsig(SIGTERM, utils.sig_handler, false);
+    utils.addsig(SIGINT,  utils.sig_handler, false);
+
+    // 提交 3 个初始 SQE（accept / 信号管道 / 定时器）
+    submit_accept_sqe();
+    submit_signal_recv_sqe();
+    submit_timeout_sqe();
+
+    Utils::u_pipefd = m_pipefd;
+
+#else
+    // ── epoll 路径（原有代码）──
     epoll_event events[MAX_EVENT_NUMBER];
     m_epollfd = epoll_create(5);
     assert(m_epollfd != -1);
@@ -156,13 +192,13 @@ void WebServer::eventListen()
     utils.addsig(SIGPIPE, SIG_IGN);
     utils.addsig(SIGALRM, utils.sig_handler, false);
     utils.addsig(SIGTERM, utils.sig_handler, false);
-    utils.addsig(SIGINT, utils.sig_handler, false);
+    utils.addsig(SIGINT,  utils.sig_handler, false);
 
     alarm(TIMESLOT);
 
-    //工具类,信号和描述符基础操作
     Utils::u_pipefd = m_pipefd;
     Utils::u_epollfd = m_epollfd;
+#endif
 }
 
 void WebServer::timer(int connfd, struct sockaddr_in client_address)
@@ -204,6 +240,7 @@ void WebServer::deal_timer(util_timer *timer, int sockfd)
     LOG_INFO("close fd %d", users_timer[sockfd].sockfd);
 }
 
+#if !IO_URING
 bool WebServer::dealclientdata()
 {
     struct sockaddr_in client_address;
@@ -247,6 +284,7 @@ bool WebServer::dealclientdata()
     }
     return true;
 }
+#endif // !IO_URING
 
 bool WebServer::dealwithsignal(bool &timeout, bool &stop_server)
 {
@@ -303,6 +341,7 @@ bool WebServer::dealwithsignal(bool &timeout, bool &stop_server)
     return true;
 }
 
+#if !IO_URING
 void WebServer::dealwithread(int sockfd)
 {
     util_timer *timer = users_timer[sockfd].timer;
@@ -353,7 +392,9 @@ void WebServer::dealwithread(int sockfd)
         }
     }
 }
+#endif // !IO_URING
 
+#if !IO_URING
 void WebServer::dealwithwrite(int sockfd)
 {
     util_timer *timer = users_timer[sockfd].timer;
@@ -399,9 +440,149 @@ void WebServer::dealwithwrite(int sockfd)
         }
     }
 }
+#endif // !IO_URING
 
 void WebServer::eventLoop()
 {
+#if IO_URING
+    // ============================================================
+    //  io_uring 事件循环
+    //  所有 I/O (accept/recv/writev/close/timeout) 由内核异步完成
+    //  应用层通过 CQE 收割结果并驱动业务逻辑
+    // ============================================================
+    printf("    \n\033[1;32m[System] Server started on port %d with io_uring support!\033[0m\n", m_port);
+    bool stop_server = false;
+
+    // 提交 eventListen 中攒下的初始 SQE
+    io_uring_submit(&ring);
+
+    while (!stop_server)
+    {
+        struct io_uring_cqe *cqe;
+        int ret = io_uring_wait_cqe(&ring, &cqe);
+        if (ret < 0)
+        {
+            if (ret == -EINTR)
+                continue;              // 信号中断，下一轮继续
+            LOG_ERROR("io_uring_wait_cqe: %s", strerror(-ret));
+            break;
+        }
+
+        unsigned head;
+        unsigned count = 0;
+        io_uring_for_each_cqe(&ring, head, cqe)
+        {
+            int     fd  = get_fd_from_user_data(cqe->user_data);
+            ConnOp  op  = get_op_from_user_data(cqe->user_data);
+            int     res = cqe->res;                // 操作返回值
+
+            switch (op)
+            {
+            // ── Accept 完成 ──
+            case OP_ACCEPT:
+            {
+                if (res >= 0)
+                {
+                    if (http_conn::m_user_count >= MAX_FD)
+                    {
+                        close(res);
+                    }
+                    else
+                    {
+                        struct sockaddr_in client_addr;
+                        socklen_t addr_len = sizeof(client_addr);
+                        getpeername(res, (struct sockaddr *)&client_addr, &addr_len);
+                        timer(res, client_addr);
+
+                        // 连接就绪 → 提交 recv SQE 开始读
+                        submit_recv_sqe(res);
+                    }
+                }
+                // 无论成功与否，重新提交 accept
+                submit_accept_sqe();
+                break;
+            }
+
+            // ── Recv 完成 ──
+            case OP_RECV:
+            {
+                if (res > 0)
+                {
+                    // 数据已由内核写入 m_read_buf
+                    users[fd].m_read_idx = res;
+                    users[fd].m_uring_state = 0;
+
+                    util_timer *timer = users_timer[fd].timer;
+                    if (timer) adjust_timer(timer);
+
+                    // 提交给线程池解析 HTTP
+                    m_pool->append_p(users + fd);
+                }
+                else
+                {
+                    // 对端关闭或出错
+                    submit_close_sqe(fd);
+                }
+                break;
+            }
+
+            // ── Write 完成 ──
+            case OP_WRITE:
+            {
+                users[fd].m_uring_state = 0;
+                handle_write_completion(fd, res);
+                break;
+            }
+
+            // ── Close 完成 ──
+            case OP_CLOSE:
+            {
+                users[fd].m_uring_state = 0;
+                util_timer *timer = users_timer[fd].timer;
+                if (timer)
+                {
+                    utils.m_timer_lst.del_timer(timer);
+                    users_timer[fd].timer = nullptr;
+                }
+                if (users[fd].m_sockfd != -1)
+                {
+                    users[fd].m_sockfd = -1;
+                    http_conn::m_user_count--;
+                }
+                break;
+            }
+
+            // ── Timeout 完成 ──
+            case OP_TIMEOUT:
+            {
+                if (res == -ECANCELED) { submit_timeout_sqe(); break; }
+                utils.timer_handler();
+                LOG_INFO("%s", "timer tick");
+                submit_timeout_sqe();
+                break;
+            }
+
+            // ── Signal 管道数据到达 ──
+            case OP_SIGNAL:
+            {
+                handle_signal_completion(res, stop_server);
+                submit_signal_recv_sqe();
+                break;
+            }
+
+            default:
+                break;
+            }
+            count++;
+        }
+        io_uring_cq_advance(&ring, count);
+    }
+
+#else
+    // ============================================================
+    //  epoll 事件循环
+    // ============================================================
+    printf("    \n\033[1;32m[System] Server started on port %d with epoll support!\033[0m\n", m_port);
     bool timeout = false;
     bool stop_server = false;
 
@@ -418,27 +599,22 @@ void WebServer::eventLoop()
         {
             int sockfd = events[i].data.fd;
 
-            //处理新到的客户连接
             if (sockfd == m_listenfd)
             {
                 bool flag = dealclientdata();
-                if (false == flag)
-                    continue;
+                if (false == flag) continue;
             }
             else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
             {
-                //服务器端关闭连接，移除对应的定时器
                 util_timer *timer = users_timer[sockfd].timer;
                 deal_timer(timer, sockfd);
             }
-            //处理信号
             else if ((sockfd == m_pipefd[0]) && (events[i].events & EPOLLIN))
             {
                 bool flag = dealwithsignal(timeout, stop_server);
                 if (false == flag)
                     LOG_ERROR("%s", "dealclientdata failure");
             }
-            //处理客户连接上接收到的数据
             else if (events[i].events & EPOLLIN)
             {
                 dealwithread(sockfd);
@@ -451,10 +627,161 @@ void WebServer::eventLoop()
         if (timeout)
         {
             utils.timer_handler();
-
             LOG_INFO("%s", "timer tick");
-
             timeout = false;
         }
     }
+#endif
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  io_uring 辅助方法（仅在 IO_URING=1 时编译）
+// ═══════════════════════════════════════════════════════════════
+#if IO_URING
+
+void WebServer::submit_accept_sqe()
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) return;
+    io_uring_prep_accept(sqe, m_listenfd, nullptr, nullptr, 0);
+    io_uring_sqe_set_data64(sqe, make_user_data(m_listenfd, OP_ACCEPT));
+}
+
+void WebServer::submit_recv_sqe(int fd)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) return;
+    io_uring_prep_recv(sqe, fd, users[fd].m_read_buf, http_conn::READ_BUFFER_SIZE, 0);
+    io_uring_sqe_set_data64(sqe, make_user_data(fd, OP_RECV));
+    users[fd].m_uring_state = OP_RECV;
+    io_uring_submit(&ring);
+}
+
+void WebServer::submit_writev_sqe(int fd)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) return;
+    io_uring_prep_writev(sqe, fd, users[fd].m_iv, users[fd].m_iv_count, 0);
+    io_uring_sqe_set_data64(sqe, make_user_data(fd, OP_WRITE));
+    users[fd].m_uring_state = OP_WRITE;
+    io_uring_submit(&ring);
+}
+
+void WebServer::submit_close_sqe(int fd)
+{
+    // 先 unmapping 文件映射
+    users[fd].unmap();
+
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe)
+    {
+        // ring 满了，直接同步关闭
+        util_timer *t = users_timer[fd].timer;
+        if (t) { utils.m_timer_lst.del_timer(t); users_timer[fd].timer = nullptr; }
+        if (users[fd].m_sockfd != -1) { close(users[fd].m_sockfd); users[fd].m_sockfd = -1; http_conn::m_user_count--; }
+        return;
+    }
+    io_uring_prep_close(sqe, fd);
+    io_uring_sqe_set_data64(sqe, make_user_data(fd, OP_CLOSE));
+    users[fd].m_uring_state = OP_CLOSE;
+    io_uring_submit(&ring);
+}
+
+void WebServer::submit_timeout_sqe()
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) return;
+    struct __kernel_timespec ts = { .tv_sec = TIMESLOT, .tv_nsec = 0 };
+    io_uring_prep_timeout(sqe, &ts, 0, IORING_TIMEOUT_ABS);
+    io_uring_sqe_set_data64(sqe, make_user_data(0, OP_TIMEOUT));
+}
+
+void WebServer::submit_signal_recv_sqe()
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) return;
+    io_uring_prep_recv(sqe, m_pipefd[0], m_signal_buf, sizeof(m_signal_buf), 0);
+    io_uring_sqe_set_data64(sqe, make_user_data(m_pipefd[0], OP_SIGNAL));
+}
+
+void WebServer::handle_write_completion(int fd, int bytes_sent)
+{
+    if (bytes_sent <= 0)
+    {
+        submit_close_sqe(fd);
+        return;
+    }
+
+    http_conn &conn = users[fd];
+    conn.bytes_have_send += bytes_sent;
+    conn.bytes_to_send   -= bytes_sent;
+
+    if (conn.bytes_to_send <= 0)
+    {
+        // 全部发送完成
+        conn.unmap();
+        if (conn.m_linger)
+        {
+            // keep-alive：重置连接状态，提交下一个 recv
+            conn.init();
+            submit_recv_sqe(fd);
+        }
+        else
+        {
+            submit_close_sqe(fd);
+        }
+    }
+    else
+    {
+        // 还有剩余数据，更新 iovec 后重新提交 writev
+        if (conn.bytes_have_send >= conn.m_iv[0].iov_len)
+        {
+            conn.m_iv[0].iov_len = 0;
+            conn.m_iv[1].iov_base = conn.m_file_address + (conn.bytes_have_send - conn.m_write_idx);
+            conn.m_iv[1].iov_len = conn.bytes_to_send;
+        }
+        else
+        {
+            conn.m_iv[0].iov_base = conn.m_write_buf + conn.bytes_have_send;
+            conn.m_iv[0].iov_len = conn.m_iv[0].iov_len - bytes_sent;
+        }
+        submit_writev_sqe(fd);
+    }
+}
+
+void WebServer::handle_signal_completion(int sig_count, bool &stop_server)
+{
+    if (sig_count <= 0) return;
+
+    for (int i = 0; i < sig_count; ++i)
+    {
+        switch (m_signal_buf[i])
+        {
+        case SIGALRM:
+            // timeout 由 io_uring timeout SQE 处理，此处忽略
+            break;
+        case SIGINT:
+        case SIGTERM:
+        {
+            printf("\n\033[1;33m[Confirm] Are you sure you want to shut down the server? (y/n): \033[0m");
+            fflush(stdout);
+            char choice;
+            if (scanf(" %c", &choice) == 1 && (choice == 'y' || choice == 'Y'))
+            {
+                stop_server = true;
+                printf("\033[1;32m[System] Shutting down gracefully...\033[0m\n");
+            }
+            else
+            {
+                stop_server = false;
+                printf("\033[1;36m[System] Shutdown cancelled. Server continues running.\033[0m\n");
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
+#endif // IO_URING
