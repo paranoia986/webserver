@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Logger Monitor</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--blue:#58a6ff;--green:#3fb950;--orange:#d2991d;--purple:#bc8cff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+.header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.25rem}.header h1 span{color:var(--blue)}
+.back{color:var(--blue);text-decoration:none;font-size:0.85rem;padding:6px 14px;border:1px solid var(--border);border-radius:6px;transition:border-color .15s}
+.back:hover{border-color:var(--blue)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:28px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center}
+.card:nth-child(1) .val{color:var(--purple)}.card:nth-child(2) .val{color:var(--green)}.card:nth-child(3) .val{color:var(--orange)}
+.card .lbl{color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.card .val{font-size:2.4rem;font-weight:700;font-variant-numeric:tabular-nums}
+.card .sub{color:var(--muted);font-size:0.72rem;margin-top:4px}
+.info{padding:0 28px 28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.info-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
+.info-card h4{font-size:0.85rem;color:var(--muted);margin-bottom:6px}
+.info-card p{font-size:0.78rem;color:var(--text);word-break:break-all;line-height:1.5}
+.footer{text-align:center;padding:20px;color:var(--muted);font-size:0.72rem;border-top:1px solid var(--border)}
+</style></head><body>
+<div class="header">
+    <h1>📝 Async <span>Logger</span></h1>
+    <a class="back" href="/dashboard.html">← Dashboard</a>
+</div>
+<div class="cards">
+    <div class="card"><div class="lbl">Mode</div><div class="val" id="v-mode">--</div></div>
+    <div class="card"><div class="lbl">Lines Written</div><div class="val" id="v-count">0</div></div>
+    <div class="card"><div class="lbl">Split Threshold</div><div class="val" id="v-split">--</div><div class="sub">lines per file</div></div>
+</div>
+<div class="info">
+    <div class="info-card"><h4>📂 Directory</h4><p id="v-dir">--</p></div>
+    <div class="info-card"><h4>📄 File Name</h4><p id="v-file">--</p></div>
+    <div class="info-card"><h4>📦 Buffer Size</h4><p>8192 bytes (m_buf in Log class)</p></div>
+    <div class="info-card"><h4>💡 Split Strategy</h4><p>Split by day (m_today != current day) OR split by line count (m_count % m_split_lines == 0)</p></div>
+</div>
+<footer class="footer">Logger Monitor · Refresh every 1s</footer>
+<script>
+async function fetchLog(){try{const r=await fetch('/api/log');const d=await r.json();document.getElementById('v-mode').textContent=d.is_async?'Async':'Sync';document.getElementById('v-count').textContent=d.count;document.getElementById('v-split').textContent=d.split_lines.toLocaleString();document.getElementById('v-dir').textContent=d.dir;document.getElementById('v-file').textContent=d.file}catch(e){console.error(e)}}
+fetchLog();setInterval(fetchLog,1000);
+</script></body></html>

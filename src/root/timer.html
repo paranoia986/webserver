@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Timer Monitor</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--cyan:#39d2c0}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+.header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.25rem}.header h1 span{color:var(--blue)}
+.back{color:var(--blue);text-decoration:none;font-size:0.85rem;padding:6px 14px;border:1px solid var(--border);border-radius:6px;transition:border-color .15s}
+.back:hover{border-color:var(--blue)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:28px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center}
+.card:nth-child(1) .val{color:var(--green)}.card:nth-child(2) .val{color:var(--red)}
+.card .lbl{color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.card .val{font-size:2.4rem;font-weight:700;font-variant-numeric:tabular-nums}
+.card .sub{color:var(--muted);font-size:0.72rem;margin-top:4px}
+.info{padding:0 28px 28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.info-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
+.info-card h4{font-size:0.85rem;color:var(--muted);margin-bottom:6px}
+.info-card p{font-size:0.8rem;color:var(--text)}
+.footer{text-align:center;padding:20px;color:var(--muted);font-size:0.72rem;border-top:1px solid var(--border)}
+</style></head><body>
+<div class="header">
+    <h1>⏱️ Timer <span>Heap</span></h1>
+    <a class="back" href="/dashboard.html">← Dashboard</a>
+</div>
+<div class="cards">
+    <div class="card"><div class="lbl">Active Timers</div><div class="val" id="v-active">0</div><div class="sub">currently alive</div></div>
+    <div class="card"><div class="lbl">Expired Timers</div><div class="val" id="v-expired">0</div><div class="sub">lifetime total</div></div>
+</div>
+<div class="info">
+    <div class="info-card"><h4>📋 Data Structure</h4><p>Bidirectional sorted linked list</p></div>
+    <div class="info-card"><h4>⏳ Timeout</h4><p>3 × TIMESLOT = 15 seconds</p></div>
+    <div class="info-card"><h4>🔄 Trigger</h4><p>io_uring IORING_OP_TIMEOUT</p></div>
+    <div class="info-card"><h4>🎯 Callback</h4><p>cb_func → close socket + m_user_count--</p></div>
+</div>
+<footer class="footer">Timer Monitor · Refresh every 1s</footer>
+<script>
+async function fetchTimer(){try{const r=await fetch('/api/timer');const d=await r.json();document.getElementById('v-active').textContent=d.active_timers;document.getElementById('v-expired').textContent=d.expired_timers}catch(e){console.error(e)}}
+fetchTimer();setInterval(fetchTimer,1000);
+</script></body></html>

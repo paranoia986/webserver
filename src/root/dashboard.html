@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebServer Dashboard</title>
+<style>
+:root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d2991d;
+    --red: #f85149; --purple: #bc8cff; --cyan: #39d2c0;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+
+/* ── 顶部 ── */
+.header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:20px 28px;border-bottom:1px solid var(--border);
+    background:var(--card);flex-wrap:wrap;gap:12px;
+}
+.header h1{font-size:1.4rem;font-weight:700}
+.header h1 span{color:var(--blue)}
+.badge{
+    padding:5px 14px;border-radius:14px;font-size:0.8rem;font-weight:600;
+    display:inline-flex;align-items:center;gap:6px;
+}
+.badge.on{background:rgba(63,185,80,0.12);color:var(--green);border:1px solid rgba(63,185,80,0.3)}
+.badge.off{background:rgba(248,81,73,0.12);color:var(--red);border:1px solid rgba(248,81,73,0.3)}
+.badge .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.badge.on .dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+.badge.off .dot{background:var(--red)}
+.uptime{color:var(--muted);font-size:0.82rem}
+
+/* ── 指标卡 ── */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;padding:24px 28px}
+.mcard{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:20px 22px;transition:border-color .2s;
+}
+.mcard:hover{border-color:var(--blue)}
+.mcard .label{color:var(--muted);font-size:0.78rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.mcard .value{font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums}
+.mcard .sub{color:var(--muted);font-size:0.75rem;margin-top:4px}
+.mcard:nth-child(1) .value{color:var(--green)}
+.mcard:nth-child(2) .value{color:var(--blue)}
+.mcard:nth-child(3) .value{color:var(--orange)}
+.mcard:nth-child(4) .value{color:var(--cyan)}
+
+/* ── 折线图 ── */
+.chart-section{padding:0 28px 24px}
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px}
+.chart-card h3{font-size:0.9rem;color:var(--muted);margin-bottom:14px}
+canvas{width:100%;height:200px;display:block}
+
+/* ── 技术栈卡片 ── */
+.section-title{padding:0 28px;font-size:1rem;color:var(--muted);margin-bottom:16px}
+.tech-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;padding:0 28px 32px}
+.tcard{
+    background:var(--card);border:1px solid var(--border);border-radius:10px;
+    padding:18px 20px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s;
+}
+.tcard:hover{transform:translateY(-2px)}
+.tcard:nth-child(1):hover{border-color:var(--blue)}
+.tcard:nth-child(2):hover{border-color:var(--green)}
+.tcard:nth-child(3):hover{border-color:var(--orange)}
+.tcard:nth-child(4):hover{border-color:var(--purple)}
+.tcard:nth-child(5):hover{border-color:var(--cyan)}
+.tcard:nth-child(6):hover{border-color:var(--red)}
+.tcard:nth-child(7):hover{border-color:var(--blue)}
+.tcard:nth-child(8):hover{border-color:var(--green)}
+.tcard:nth-child(9):hover{border-color:var(--orange)}
+.tcard .t-icon{font-size:1.4rem;margin-bottom:8px}
+.tcard h4{font-size:0.92rem;margin-bottom:4px}
+.tcard p{font-size:0.78rem;color:var(--muted);line-height:1.5}
+.tcard .status{position:absolute;top:14px;right:16px;font-size:0.68rem;padding:2px 8px;border-radius:10px}
+.tcard .status.enabled{background:rgba(63,185,80,0.12);color:var(--green)}
+.tcard .status.disabled{background:rgba(139,148,158,0.12);color:var(--muted)}
+
+/* ── 架构图 ── */
+.arch{padding:0 28px 40px}
+.arch-diagram{
+    display:flex;flex-direction:column;align-items:center;gap:10px;
+    font-size:0.78rem;font-family:'SF Mono','Fira Code',monospace;
+}
+.a-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.a-box{
+    background:var(--card);border:1px solid var(--border);border-radius:8px;
+    padding:10px 16px;text-align:center;min-width:90px;transition:border-color .2s
+}
+.a-box:hover{border-color:var(--blue)}
+.a-box .lbl{color:var(--muted);font-size:0.65rem;margin-top:3px}
+.a-arrow{color:var(--muted);font-size:1rem}
+.a-box.hi{border-color:var(--blue);background:rgba(88,166,255,0.05)}
+
+.footer{text-align:center;padding:24px;color:var(--muted);font-size:0.72rem;border-top:1px solid var(--border)}
+
+/* ── 脉冲动画 ── */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.live{animation:pulse 1.5s infinite}
+
+/* ── 子模块导航 ── */
+.nav-row{display:flex;flex-wrap:wrap;gap:12px;padding:0 28px 32px;justify-content:center}
+.nav-btn{
+    padding:10px 22px;border-radius:10px;font-size:0.85rem;font-weight:600;text-decoration:none;
+    background:var(--card);color:var(--text);border:1px solid var(--border);
+    transition:border-color .15s,transform .15s;
+}
+.nav-btn:hover{border-color:var(--blue);transform:translateY(-2px)}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ 顶部 ═══════════ -->
+<div class="header">
+    <div>
+        <h1>⚡ Web<span>Server</span> Dashboard</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px">
+        <span class="uptime" id="uptime">--</span>
+        <span class="badge on" id="mode-badge">
+            <span class="dot"></span><span id="mode-text">io_uring</span>
+        </span>
+        <span class="live" style="color:var(--green);font-size:0.75rem">● LIVE</span>
+    </div>
+</div>
+
+<!-- ═══════════ 指标卡 ═══════════ -->
+<div class="metrics">
+    <div class="mcard">
+        <div class="label">Active Connections</div>
+        <div class="value" id="v-conn">0</div>
+        <div class="sub">total: <span id="v-total-conn">0</span></div>
+    </div>
+    <div class="mcard">
+        <div class="label">Total Requests</div>
+        <div class="value" id="v-req">0</div>
+        <div class="sub">processed</div>
+    </div>
+    <div class="mcard">
+        <div class="label">Requests / sec</div>
+        <div class="value" id="v-rps">0</div>
+        <div class="sub">current rate</div>
+    </div>
+    <div class="mcard">
+        <div class="label">Throughput</div>
+        <div class="value" id="v-tp">0</div>
+        <div class="sub">KB/s sent · <span id="v-tp-recv">0</span> KB/s recv</div>
+    </div>
+</div>
+
+<!-- ═══════════ 折线图 ═══════════ -->
+<div class="chart-section">
+    <div class="chart-card">
+        <h3>📈 Request Rate (last 60s)</h3>
+        <canvas id="chart"></canvas>
+    </div>
+</div>
+
+<!-- ═══════════ 技术栈 ═══════════ -->
+<div class="section-title">🛠 Technology Stack</div>
+<div class="tech-grid" id="tech-grid"></div>
+
+<!-- ═══════════ 子模块导航 ═══════════ -->
+<div class="section-title">📋 Subsystem Monitors</div>
+<div class="nav-row">
+    <a class="nav-btn" href="/mysql.html">🗄️ MySQL Pool</a>
+    <a class="nav-btn" href="/threadpool.html">🧵 Thread Pool</a>
+    <a class="nav-btn" href="/timer.html">⏱️ Timer Heap</a>
+    <a class="nav-btn" href="/logger.html">📝 Logger</a>
+    <a class="nav-btn" href="/config.html">🔧 Config</a>
+</div>
+
+<!-- ═══════════ 架构图 ═══════════ -->
+<div class="section-title">📐 Architecture</div>
+<div class="arch">
+<div class="arch-diagram">
+    <div class="a-row"><div class="a-box hi"><div>🔌 Client</div><div class="lbl">HTTP Request</div></div></div>
+    <div class="a-arrow">▼</div>
+    <div class="a-row"><div class="a-box hi"><div>⚡ io_uring Ring</div><div class="lbl">accept / recv / writev</div></div></div>
+    <div class="a-arrow">▼</div>
+    <div class="a-row">
+        <div class="a-box">📥 Read Buffer</div>
+        <div class="a-box hi">🧵 Thread Pool</div>
+        <div class="a-box">🗄️ MySQL Pool</div>
+    </div>
+    <div class="a-arrow">▼</div>
+    <div class="a-row">
+        <div class="a-box">🔍 Parser</div>
+        <div class="a-box">📋 CGI Router</div>
+        <div class="a-box">📦 mmap</div>
+    </div>
+    <div class="a-arrow">▼</div>
+    <div class="a-row"><div class="a-box hi">📤 writev</div><div class="a-box">⏱️ Timer</div><div class="a-box">📝 Async Log</div></div>
+</div>
+</div>
+
+<footer class="footer">C++17 · CMake + Conan · io_uring &amp; epoll · Valgrind Clean ✓ · <a href="https://github.com/paranoia986/webserver" target="_blank" style="color:var(--blue);text-decoration:none">GitHub</a></footer>
+
+<script>
+// ── 技术栈数据 ──
+const techs = [
+    {icon:'⚡',name:'io_uring',desc:'Linux 5.1+ 异步 I/O，SQE/CQE 环形队列，零系统调用开销',id:'io_uring'},
+    {icon:'🔁',name:'epoll (fallback)',desc:'LT+ET 双模式，EPOLLONESHOT，<code>-DIO_URING=OFF</code> 回退',id:'epoll'},
+    {icon:'🧵',name:'Thread Pool',desc:'Proactor 模式，pthread 信号量+互斥锁，Reactor/Proactor 可切换',id:'thread'},
+    {icon:'🗄️',name:'MySQL Connection Pool',desc:'RAII 风格，Unix Socket / TCP 双模式，信号量控制并发',id:'mysql'},
+    {icon:'⏱️',name:'Timer Heap',desc:'升序双向链表，每连接独立定时器，自动续期，超时关闭',id:'timer'},
+    {icon:'🌐',name:'HTTP/1.1 Parser',desc:'有限状态机，GET/POST，keep-alive，mmap 零拷贝文件传输',id:'http'},
+    {icon:'📝',name:'Async Logger',desc:'单例+阻塞队列+后端线程，按天翻滚，按行切分，线程安全',id:'log'},
+    {icon:'🔧',name:'YAML Config',desc:'yaml-cpp 声明式配置，command-line 覆盖，端口/线程/模式集中管理',id:'yaml'},
+    {icon:'🛡️',name:'Memory Safe',desc:'Valgrind Memcheck 零泄漏，RAII 资源管理，双模式全路径验证',id:'mem'},
+];
+
+function renderTechStack(ioUring) {
+    const grid = document.getElementById('tech-grid');
+    grid.innerHTML = techs.map(t => {
+        let enabled = true;
+        if (t.id === 'io_uring' && !ioUring) enabled = false;
+        if (t.id === 'epoll' && ioUring) enabled = true; // always show as available
+        return `<div class="tcard">
+            <span class="status ${enabled?'enabled':'disabled'}">${enabled?'ACTIVE':'standby'}</span>
+            <div class="t-icon">${t.icon}</div>
+            <h4>${t.name}</h4>
+            <p>${t.desc}</p>
+        </div>`;
+    }).join('');
+}
+
+// ── 折线图 ──
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+const history = new Array(60).fill(0);
+let histIdx = 0;
+
+function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth - 44;
+    canvas.height = 200;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function drawChart() {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // 网格
+    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        const y = 10 + (H - 20) * i / 4;
+        ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(W - 10, y); ctx.stroke();
+    }
+
+    // 数据线
+    const max = Math.max(...history, 1) * 1.2;
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < history.length; i++) {
+        const x = 20 + (W - 30) * i / (history.length - 1);
+        const y = H - 10 - (H - 20) * history[i] / max;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // 填充
+    ctx.lineTo(W - 10, H - 10); ctx.lineTo(20, H - 10); ctx.closePath();
+    ctx.fillStyle = 'rgba(88,166,255,0.06)'; ctx.fill();
+
+    // 标签
+    ctx.fillStyle = '#8b949e'; ctx.font = '10px monospace';
+    ctx.fillText(Math.round(max), 22, 18);
+    ctx.fillText('0', 22, H - 14);
+    ctx.fillText('req/s', 22, 30);
+}
+
+// ── 数据轮询 ──
+function fmtTime(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;
+}
+
+async function fetchStats() {
+    try {
+        const r = await fetch('/api/stats');
+        const d = await r.json();
+
+        // 指标卡
+        document.getElementById('v-conn').textContent = d.active_connections;
+        document.getElementById('v-total-conn').textContent = d.total_connections;
+        document.getElementById('v-req').textContent = d.total_requests;
+        document.getElementById('v-rps').textContent = d.requests_per_sec.toFixed(1);
+        document.getElementById('v-tp').textContent = d.sent_kbps.toFixed(1);
+        document.getElementById('v-tp-recv').textContent = d.recv_kbps.toFixed(1);
+        document.getElementById('uptime').textContent = '▲ ' + fmtTime(d.uptime_seconds);
+
+        // 模式徽章
+        const badge = document.getElementById('mode-badge');
+        const txt = document.getElementById('mode-text');
+        if (d.io_uring) {
+            badge.className = 'badge on'; txt.textContent = 'io_uring';
+        } else {
+            badge.className = 'badge off'; txt.textContent = 'epoll';
+        }
+
+        // 技术栈（首次渲染）
+        if (!window._techRendered) {
+            renderTechStack(d.io_uring);
+            window._techRendered = true;
+        }
+
+        // 折线图
+        history[histIdx] = d.requests_per_sec;
+        histIdx = (histIdx + 1) % history.length;
+        drawChart();
+    } catch (e) {
+        console.error('fetch stats:', e);
+    }
+}
+
+// 立即拉取一次，然后每秒轮询
+fetchStats();
+setInterval(fetchStats, 1000);
+</script>
+</body>
+</html>

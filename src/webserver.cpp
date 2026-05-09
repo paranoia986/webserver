@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <string>
+#include "utils/metrics.h"
 #if IO_URING == 1
     #include <liburing.h>
 #endif
@@ -54,6 +55,23 @@ void WebServer::init(int port, string user, string passWord, string databaseName
     m_TRIGMode = trigmode;
     m_close_log = close_log;
     m_actormodel = actor_model;
+
+    ConfigSnapshot cfg;
+    cfg.port            = port;
+#if IO_URING
+    cfg.io_uring        = 1;
+#else
+    cfg.io_uring        = 0;
+#endif
+    cfg.trig_mode       = trigmode;
+    cfg.listen_trigmode = 0;
+    cfg.conn_trigmode   = 0;
+    cfg.opt_linger      = opt_linger;
+    cfg.sql_num         = sql_num;
+    cfg.thread_num      = thread_num;
+    cfg.close_log       = close_log;
+    cfg.actor_model     = actor_model;
+    MetricsCollector::getInstance().set_config(cfg);
 }
 
 void WebServer::trig_mode()
@@ -101,6 +119,7 @@ void WebServer::sql_pool()
     //初始化数据库连接池
     m_connPool = connection_pool::GetInstance();
     m_connPool->init("/run/mysqld/mysqld.sock", m_user, m_passWord, m_databaseName, m_sql_num, m_close_log);
+    MetricsCollector::getInstance().set_mysql_pool_size(m_sql_num);
 
     //初始化数据库读取表
     users->initmysql_result(m_connPool);
@@ -110,6 +129,7 @@ void WebServer::thread_pool()
 {
     //线程池
     m_pool = new threadpool<http_conn>(m_actormodel, m_connPool, m_thread_num);
+    MetricsCollector::getInstance().set_thread_pool_size(m_thread_num);
 }
 
 void WebServer::eventListen()
@@ -216,6 +236,7 @@ void WebServer::timer(int connfd, struct sockaddr_in client_address)
     timer->expire = cur + 3 * TIMESLOT;
     users_timer[connfd].timer = timer;
     utils.m_timer_lst.add_timer(timer);
+    MetricsCollector::getInstance().record_timer_add();
 }
 
 //若有数据传输，则将定时器往后延迟3个单位
@@ -494,6 +515,8 @@ void WebServer::eventLoop()
                         getpeername(res, (struct sockaddr *)&client_addr, &addr_len);
                         timer(res, client_addr);
 
+                        MetricsCollector::getInstance().record_accept();
+
                         // 连接就绪 → 提交 recv SQE 开始读
                         submit_recv_sqe(res);
                     }
@@ -508,6 +531,7 @@ void WebServer::eventLoop()
             {
                 if (res > 0)
                 {
+                    MetricsCollector::getInstance().record_recv(static_cast<uint64_t>(res));
                     // 数据已由内核写入 m_read_buf
                     users[fd].m_read_idx = res;
                     users[fd].m_uring_state = 0;
@@ -529,6 +553,7 @@ void WebServer::eventLoop()
             // ── Write 完成 ──
             case OP_WRITE:
             {
+                MetricsCollector::getInstance().record_sent(static_cast<uint64_t>(res > 0 ? res : 0));
                 users[fd].m_uring_state = 0;
                 handle_write_completion(fd, res);
                 break;
@@ -537,6 +562,7 @@ void WebServer::eventLoop()
             // ── Close 完成 ──
             case OP_CLOSE:
             {
+                MetricsCollector::getInstance().record_close();
                 users[fd].m_uring_state = 0;
                 util_timer *timer = users_timer[fd].timer;
                 if (timer)
@@ -769,12 +795,12 @@ void WebServer::handle_signal_completion(int sig_count, bool &stop_server)
             if (scanf(" %c", &choice) == 1 && (choice == 'y' || choice == 'Y'))
             {
                 stop_server = true;
-                printf("\033[1;32m[System] Shutting down gracefully...\033[0m\n");
+                printf("\n\033[1;32m[System] Shutting down gracefully...\033[0m\n");
             }
             else
             {
                 stop_server = false;
-                printf("\033[1;36m[System] Shutdown cancelled. Server continues running.\033[0m\n");
+                printf("\n\033[1;36m[System] Shutdown cancelled. Server continues running.\033[0m\n");
             }
             break;
         }

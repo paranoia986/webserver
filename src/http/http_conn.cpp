@@ -1,4 +1,5 @@
 #include "http_conn.h"
+#include "utils/metrics.h"
 
 #include <mysql/mysql.h>
 #include <fstream>
@@ -425,6 +426,197 @@ http_conn::HTTP_CODE http_conn::process_read()
 
 http_conn::HTTP_CODE http_conn::do_request()
 {
+    // ── API 路由（优先级最高）──
+    if (strncmp(m_url, "/api/", 5) == 0)
+    {
+        if (strncmp(m_url, "/api/stats", 10) == 0)
+        {
+            auto &mc = MetricsCollector::getInstance();
+            auto s   = mc.snapshot();
+
+            char json[1536];
+            int json_len = snprintf(json, sizeof(json),
+                "{"
+                "\"active_connections\":%d,"
+                "\"total_connections\":%llu,"
+                "\"total_requests\":%llu,"
+                "\"total_recv_mb\":%.2f,"
+                "\"total_sent_mb\":%.2f,"
+                "\"active_timers\":%d,"
+                "\"expired_timers\":%llu,"
+                "\"uptime_seconds\":%llu,"
+                "\"requests_per_sec\":%.1f,"
+                "\"recv_kbps\":%.1f,"
+                "\"sent_kbps\":%.1f,"
+                "\"io_uring\":%d,"
+                "\"thread_pool_size\":%d,"
+                "\"mysql_pool_size\":%d,"
+                "\"tpool_queue_size\":%d,"
+                "\"tpool_model\":%d"
+                "}",
+                s.active_connections,
+                (unsigned long long)s.total_connections,
+                (unsigned long long)s.total_requests,
+                s.total_recv_bytes / 1048576.0,
+                s.total_sent_bytes / 1048576.0,
+                s.active_timers,
+                (unsigned long long)s.expired_timers,
+                (unsigned long long)s.uptime_seconds,
+                s.requests_per_sec,
+                s.recv_kbps,
+                s.sent_kbps,
+                s.io_uring_enabled,
+                s.thread_pool_size,
+                s.mysql_pool_size,
+                s.tpool_queue_size,
+                s.tpool_model
+            );
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n"
+                "\r\n"
+                "%s",
+                json_len, json
+            );
+            return API_RESPONSE;
+        }
+
+        if (strncmp(m_url, "/api/info", 9) == 0)
+        {
+            char json[512];
+            int json_len = snprintf(json, sizeof(json),
+                "{"
+                "\"io_uring\":%d,"
+                "\"compiler\":\"GCC %d.%d.%d\","
+                "\"build_date\":\"%s\","
+                "\"build_time\":\"%s\""
+                "}",
+#if IO_URING
+                1,
+#else
+                0,
+#endif
+                __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__,
+                __DATE__, __TIME__
+            );
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n"
+                "\r\n"
+                "%s",
+                json_len, json
+            );
+            return API_RESPONSE;
+        }
+
+        // ── 新增子模块 API ──
+
+        if (strncmp(m_url, "/api/mysql-pool", 15) == 0)
+        {
+            auto *pool = connection_pool::GetInstance();
+            auto s     = pool->GetStats();
+            char json[256];
+            int json_len = snprintf(json, sizeof(json),
+                "{\"cur_conn\":%d,\"free_conn\":%d,\"max_conn\":%d,\"utilization\":%.1f}",
+                s.cur_conn, s.free_conn, s.max_conn,
+                s.max_conn > 0 ? (100.0 * s.cur_conn / s.max_conn) : 0.0);
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n%s", json_len, json);
+            return API_RESPONSE;
+        }
+
+        if (strncmp(m_url, "/api/thread-pool", 16) == 0)
+        {
+            auto &mc = MetricsCollector::getInstance();
+            auto s   = mc.snapshot();
+            char json[256];
+            int json_len = snprintf(json, sizeof(json),
+                "{\"threads\":%d,\"queue_size\":%d,\"max_queue\":10000,\"model\":%d,\"model_name\":\"%s\"}",
+                s.thread_pool_size, s.tpool_queue_size, s.tpool_model,
+                s.tpool_model == 0 ? "proactor" : "reactor");
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n%s", json_len, json);
+            return API_RESPONSE;
+        }
+
+        if (strncmp(m_url, "/api/timer", 10) == 0)
+        {
+            auto &mc = MetricsCollector::getInstance();
+            auto s   = mc.snapshot();
+            char json[128];
+            int json_len = snprintf(json, sizeof(json),
+                "{\"active_timers\":%d,\"expired_timers\":%llu}",
+                s.active_timers, (unsigned long long)s.expired_timers);
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n%s", json_len, json);
+            return API_RESPONSE;
+        }
+
+        if (strncmp(m_url, "/api/log", 8) == 0)
+        {
+            auto *log = Log::get_instance();
+            char json[512];
+            int json_len = snprintf(json, sizeof(json),
+                "{\"is_async\":%d,\"is_open\":%d,\"split_lines\":%d,\"count\":%lld,\"dir\":\"%s\",\"file\":\"%s\"}",
+                log->is_async() ? 1 : 0, log->is_open() ? 1 : 0,
+                log->split_lines(), (long long)log->count(),
+                log->log_dir(), log->log_file());
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n%s", json_len, json);
+            return API_RESPONSE;
+        }
+
+        if (strncmp(m_url, "/api/config", 11) == 0)
+        {
+            auto &mc = MetricsCollector::getInstance();
+            auto c   = mc.get_config();
+            char json[512];
+            int json_len = snprintf(json, sizeof(json),
+                "{"
+                "\"port\":%d,\"io_uring\":%d,\"trig_mode\":%d,"
+                "\"listen_trigmode\":%d,\"conn_trigmode\":%d,"
+                "\"opt_linger\":%d,\"sql_num\":%d,\"thread_num\":%d,"
+                "\"close_log\":%d,\"actor_model\":%d"
+                "}",
+                c.port, c.io_uring, c.trig_mode,
+                c.listen_trigmode, c.conn_trigmode,
+                c.opt_linger, c.sql_num, c.thread_num,
+                c.close_log, c.actor_model);
+
+            m_write_idx = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %d\r\n\r\n%s", json_len, json);
+            return API_RESPONSE;
+        }
+
+        // 未知 API 端点
+        return BAD_REQUEST;
+    }
+
     strcpy(m_real_file, doc_root);
     int len = strlen(doc_root);
     //printf("m_url:%s\n", m_url);
@@ -717,6 +909,12 @@ bool http_conn::process_write(HTTP_CODE ret)
                 return false;
         }
     }
+    case API_RESPONSE:
+    {
+        // API 响应已在 do_request() 中完整构建到 m_write_buf
+        // 直接发送即可
+        break;
+    }
     default:
         return false;
     }
@@ -766,6 +964,7 @@ void http_conn::process()
     struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
     if (sqe)
     {
+        MetricsCollector::getInstance().record_request();
         io_uring_prep_writev(sqe, m_sockfd, m_iv, m_iv_count, 0);
         io_uring_sqe_set_data64(sqe, make_user_data(m_sockfd, OP_WRITE));
         m_uring_state = OP_WRITE;

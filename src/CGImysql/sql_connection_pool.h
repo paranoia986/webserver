@@ -13,6 +13,13 @@
 
 using namespace std;
 
+struct PoolStats
+{
+    int cur_conn;   // 当前已使用的连接数
+    int free_conn;  // 当前空闲的连接数
+    int max_conn;   // 最大连接数
+};
+
 class connection_pool
 {
 public:
@@ -36,6 +43,7 @@ public:
 	MYSQL *GetConnection();				 //获取数据库连接
 	bool ReleaseConnection(MYSQL *conn); //释放连接
 	int GetFreeConn();					 //获取连接
+	PoolStats GetStats();                //获取连接池统计
 	void DestroyPool();					 //销毁所有连接
 	//单例模式
 	static connection_pool *GetInstance();

@@ -45,6 +45,14 @@ public:
 
     void flush(void);
 
+    // ── 查询接口 ──
+    bool is_async()    const { return m_is_async; }
+    bool is_open()     const { return m_close_log == 0; }
+    int  split_lines() const { return m_split_lines; }
+    long long count()  const { return m_count; }
+    const char* log_dir()  const { return dir_name; }
+    const char* log_file() const { return log_name; }
+
 private:
     Log();
     virtual ~Log();

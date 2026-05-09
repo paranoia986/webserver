@@ -1,17 +1,25 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="UTF-8">
-        <title>awsl</title>
-    </head>
-    <body><br/>
-<br/>
-<div align="center"><font size="5"> <strong>你居然想看视频</strong></font></div>
-<br/>
-
-<br/>
-<br/>
-<div align="center"><video width="906" height="506" controls>
-    <source src="xxx.mp4" type="video/mp4">
-</video></div>
-</html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Video</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--blue:#58a6ff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.header{width:100%;display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.25rem}.header h1 span{color:var(--blue)}
+.back{color:var(--blue);text-decoration:none;font-size:0.85rem;padding:6px 14px;border:1px solid var(--border);border-radius:6px}
+.back:hover{border-color:var(--blue)}
+.player{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:30px 20px;max-width:910px}
+.player video{width:100%;display:block;max-height:70vh}
+.player .cap{text-align:center;padding:14px;color:var(--muted);font-size:0.82rem;border-top:1px solid var(--border)}
+</style></head><body>
+<div class="header">
+    <h1>🎬 Video <span>Player</span></h1>
+    <a class="back" href="/welcome.html">← 返回</a>
+</div>
+<div class="player">
+    <video controls poster="/caps.jpg">
+        <source src="/onepiece.mp4" type="video/mp4">
+    </video>
+    <div class="cap">onepiece.mp4</div>
+</div>
+</body></html>

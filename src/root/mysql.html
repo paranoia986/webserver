@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>MySQL Pool Monitor</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d2991d}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+.header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.25rem}.header h1 span{color:var(--blue)}
+.back{color:var(--blue);text-decoration:none;font-size:0.85rem;padding:6px 14px;border:1px solid var(--border);border-radius:6px;transition:border-color .15s}
+.back:hover{border-color:var(--blue)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:28px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center}
+.card:nth-child(1) .val{color:var(--green)}.card:nth-child(2) .val{color:var(--blue)}.card:nth-child(3) .val{color:var(--orange)}
+.card .lbl{color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.card .val{font-size:2.4rem;font-weight:700;font-variant-numeric:tabular-nums}
+.bar-wrap{padding:0 28px 28px}
+.bar-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px}
+.bar-card h3{font-size:0.85rem;color:var(--muted);margin-bottom:14px}
+.bar{height:28px;background:#21262d;border-radius:14px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:14px;transition:width .4s;background:linear-gradient(90deg,var(--green),var(--blue))}
+.bar-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.75rem;font-weight:600}
+.footer{text-align:center;padding:20px;color:var(--muted);font-size:0.72rem;border-top:1px solid var(--border)}
+</style></head><body>
+<div class="header">
+    <h1>🗄️ MySQL <span>Connection Pool</span></h1>
+    <a class="back" href="/dashboard.html">← Dashboard</a>
+</div>
+<div class="cards">
+    <div class="card"><div class="lbl">Active Connections</div><div class="val" id="v-cur">0</div></div>
+    <div class="card"><div class="lbl">Free Connections</div><div class="val" id="v-free">0</div></div>
+    <div class="card"><div class="lbl">Max Connections</div><div class="val" id="v-max">0</div></div>
+</div>
+<div class="bar-wrap"><div class="bar-card">
+    <h3>📊 Pool Utilization</h3>
+    <div class="bar"><div class="bar-fill" id="bar-fill" style="width:0%"></div><div class="bar-text" id="bar-txt">0%</div></div>
+</div></div>
+<footer class="footer">MySQL Pool Monitor · Refresh every 1s</footer>
+<script>
+async function fetchPool(){try{const r=await fetch('/api/mysql-pool');const d=await r.json();document.getElementById('v-cur').textContent=d.cur_conn;document.getElementById('v-free').textContent=d.free_conn;document.getElementById('v-max').textContent=d.max_conn;document.getElementById('bar-fill').style.width=d.utilization+'%';document.getElementById('bar-txt').textContent=d.utilization.toFixed(1)+'%'}catch(e){console.error(e)}}
+fetchPool();setInterval(fetchPool,1000);
+</script></body></html>

@@ -7,6 +7,15 @@
 #include <pthread.h>
 #include "../lock/locker.h"
 #include "../CGImysql/sql_connection_pool.h"
+#include "../utils/metrics.h"
+
+struct TPoolStats
+{
+    int threads;      // 线程数
+    int queue_size;   // 当前队列长度
+    int max_queue;    // 最大队列长度
+    int model;        // 0=proactor, 1=reactor
+};
 
 template <typename T>
 class threadpool
@@ -17,6 +26,17 @@ public:
     ~threadpool();
     bool append(T *request, int state);
     bool append_p(T *request);
+    TPoolStats GetStats()
+    {
+        TPoolStats s;
+        m_queuelocker.lock();
+        s.threads    = m_thread_number;
+        s.queue_size = static_cast<int>(m_workqueue.size());
+        s.max_queue  = m_max_requests;
+        s.model      = m_actor_model;
+        m_queuelocker.unlock();
+        return s;
+    }
 
 private:
     /*工作线程运行的函数，它不断从工作队列中取出任务并执行之*/
@@ -72,6 +92,7 @@ bool threadpool<T>::append(T *request, int state)
     request->m_state = state;
     m_workqueue.push_back(request);
     m_queuelocker.unlock();
+    MetricsCollector::getInstance().set_tpool_status(static_cast<int>(m_workqueue.size()), m_actor_model);
     m_queuestat.post();
     return true;
 }
@@ -86,6 +107,7 @@ bool threadpool<T>::append_p(T *request)
     }
     m_workqueue.push_back(request);
     m_queuelocker.unlock();
+    MetricsCollector::getInstance().set_tpool_status(static_cast<int>(m_workqueue.size()), m_actor_model);
     m_queuestat.post();
     return true;
 }

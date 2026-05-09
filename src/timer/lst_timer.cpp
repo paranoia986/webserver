@@ -1,5 +1,6 @@
 #include "lst_timer.h"
 #include "../http/http_conn.h"
+#include "../utils/metrics.h"
 
 sort_timer_lst::sort_timer_lst()
 {
@@ -68,6 +69,7 @@ void sort_timer_lst::del_timer(util_timer *timer)
     {
         return;
     }
+    MetricsCollector::getInstance().record_timer_remove();
     if ((timer == head) && (timer == tail))
     {
         delete timer;
@@ -109,6 +111,7 @@ void sort_timer_lst::tick()
             break;
         }
         tmp->cb_func(tmp->user_data);
+        MetricsCollector::getInstance().record_timer_expire();
         head = tmp->next;
         if (head)
         {
@@ -143,6 +146,13 @@ void sort_timer_lst::add_timer(util_timer *timer, util_timer *lst_head)
         timer->next = NULL;
         tail = timer;
     }
+}
+
+int sort_timer_lst::size() const
+{
+    int n = 0;
+    for (util_timer *p = head; p; p = p->next) ++n;
+    return n;
 }
 
 void Utils::init(int timeslot)

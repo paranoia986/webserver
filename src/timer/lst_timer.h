@@ -61,6 +61,7 @@ public:
     void adjust_timer(util_timer *timer);
     void del_timer(util_timer *timer);
     void tick();
+    int  size() const;              // 返回当前链表节点数
 
 private:
     void add_timer(util_timer *timer, util_timer *lst_head);

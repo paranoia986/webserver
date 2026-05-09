@@ -81,7 +81,8 @@ public:
         FORBIDDEN_REQUEST,
         FILE_REQUEST,
         INTERNAL_ERROR,
-        CLOSED_CONNECTION
+        CLOSED_CONNECTION,
+        API_RESPONSE       // /api/* 路由直接返回
     };
     enum LINE_STATUS
     {

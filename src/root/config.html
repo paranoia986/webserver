@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Config Viewer</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--blue:#58a6ff;--green:#3fb950;--orange:#d2991d;--red:#f85149}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+.header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+.header h1{font-size:1.25rem}.header h1 span{color:var(--blue)}
+.back{color:var(--blue);text-decoration:none;font-size:0.85rem;padding:6px 14px;border:1px solid var(--border);border-radius:6px;transition:border-color .15s}
+.back:hover{border-color:var(--blue)}
+.table-wrap{padding:28px;max-width:700px;margin:0 auto}
+.table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.table tr{border-bottom:1px solid var(--border)}
+.table tr:last-child{border-bottom:none}
+.table td{padding:12px 18px;font-size:0.85rem}
+.table td.key{color:var(--muted);width:40%;white-space:nowrap}
+.table td.val{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.table .enabled{color:var(--green)}.table .disabled{color:var(--red)}
+.footer{text-align:center;padding:20px;color:var(--muted);font-size:0.72rem;border-top:1px solid var(--border)}
+</style></head><body>
+<div class="header">
+    <h1>🔧 Server <span>Configuration</span></h1>
+    <a class="back" href="/dashboard.html">← Dashboard</a>
+</div>
+<div class="table-wrap">
+<table class="table" id="cfg-table">
+<tr><td class="key">Loading...</td><td class="val">--</td></tr>
+</table>
+</div>
+<footer class="footer">Config Viewer · Refresh every 1s</footer>
+<script>
+const labels={
+    port:'📡 Port',trig_mode:'🔄 TRIG Mode',
+    listen_trigmode:'👂 Listen TRIG',conn_trigmode:'🔗 Conn TRIG',
+    opt_linger:'⏳ Linger',sql_num:'🗄️ SQL Pool Size',
+    thread_num:'🧵 Thread Pool Size',close_log:'📝 Close Log',
+    actor_model:'🎭 Actor Model'
+};
+const trigModes={0:'LT+LT',1:'LT+ET',2:'ET+LT',3:'ET+ET'};
+const actorNames={0:'Proactor',1:'Reactor'};
+
+async function fetchCfg(){try{const r=await fetch('/api/config');const d=await r.json();let rows='';for(const[k,v]of Object.entries(d)){if(k==='io_uring'){rows+='<tr><td class="key">⚡ io_uring</td><td class="val '+(v?'enabled':'disabled')+'">'+(v?'Enabled ✓':'Disabled')+'</td></tr>';continue}if(!labels[k])continue;let val=v;if(k==='trig_mode')val=trigModes[v]||v;if(k==='actor_model')val=actorNames[v]||v;if(k==='close_log')val=v?'Closed':'Open';rows+='<tr><td class="key">'+labels[k]+'</td><td class="val">'+val+'</td></tr>'}document.getElementById('cfg-table').innerHTML=rows}catch(e){console.error(e)}}
+fetchCfg();setInterval(fetchCfg,5000);
+</script></body></html>

@@ -160,6 +160,17 @@ int connection_pool::GetFreeConn()
 	return this->m_FreeConn;
 }
 
+PoolStats connection_pool::GetStats()
+{
+	PoolStats s;
+	lock.lock();
+	s.cur_conn  = m_CurConn;
+	s.free_conn = m_FreeConn;
+	s.max_conn  = m_MaxConn;
+	lock.unlock();
+	return s;
+}
+
 connection_pool::~connection_pool()
 {
 	DestroyPool();

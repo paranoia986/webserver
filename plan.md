@@ -1,71 +1,66 @@
-顺序	文件	                     工作内容
-1	CMakeLists.txt	            添加 option(IO_URING) 和add_compile_definitions  (1)
+Plan: 子模块监控页面扩展
+新增 5 个 API + 5 个子页面，通过 Dashboard 按钮跳转。
 
-2	webserver.h	                条件成员 + ConnOp 枚举（1）
-
-3	http_conn.h	                条件 ring 指针
-
-4	lst_timer.h	                条件 ring 指针
-
-5	webserver.cpp	            eventListen/eventLoop 重写
-
-6	http_conn.cpp	            I/O 函数适配
-
-7	lst_timer.cpp	            定时器适配
-
-Steps
-## Phase 1: 构建系统
-
-### Step 1 — CMakeLists.txt
-
-添加 option(IO_URING "Use io_uring" ON)，默认开启
-if(IO_URING) 设置 add_compile_definitions(IO_URING=1) 并 find_package(liburing REQUIRED)
-else() 设置 add_compile_definitions(IO_URING=0)
-条件链接 target_link_libraries
+新增 API
+端点	数据来源	返回
+GET /api/mysql-pool	connection_pool 新增 GetStats()	活跃/空闲/最大连接
+GET /api/thread-pool	threadpool 新增 GetStats()	线程数/队列长/最大队列/模型
+GET /api/timer	MetricsCollector 新增字段	活跃定时器/累计超时
+GET /api/log	Log 新增 GetInfo()	异步状态/文件路径
+GET /api/config	MetricsCollector 新增字段	PORT/模式/线程数等
 
 ---
-## Phase 2: 头文件
 
-### Step 2 — webserver.h（依赖 Step 1）
+## Steps
+### Step 1 — 扩展现有类（数据采集层）
+文件	改动
+CGImysql/sql_connection_pool.h	新增 struct PoolStats { int cur, free, max; } + PoolStats GetStats()
+threadpool/threadpool.h	新增 struct TPoolStats { int threads, queue_size, max_queue, model; } + TPoolStats GetStats()
+log/log.h	新增 bool is_async()、const char* log_path()、bool is_open()
+timer/lst_timer.h	sort_timer_lst 新增 int size() 方法
+utils/metrics.h	新增 record_timer_add/remove/expire + set_config(...) + 对应 atomic 字段
 
-#if IO_URING：用 struct io_uring ring 替换 int m_epollfd 和 epoll_event events[]
-新增连接操作状态枚举 ConnOp（ACCEPT/RECV/WRITE/CLOSE/TIMEOUT/SIGNAL）
-保留 m_pipefd[2]（SIGINT/SIGTERM 仍需管道）
+### Step 2 — http_conn.cpp 新增 5 个 API 路由
+在 do_request() 中添加：
 
-### Step 3 — http_conn.h（依赖 Step 1）
+/api/mysql-pool → connection_pool::GetInstance()->GetStats() → JSON
+/api/thread-pool → 通过全局/静态指针获取 threadpool stats → JSON
+/api/timer → MetricsCollector::snapshot() → JSON
+/api/log → Log::get_instance()->GetInfo() → JSON
+/api/config → MetricsCollector 新增 ConfigSnapshot → JSON
 
-static int m_epollfd → 条件为 #if IO_URING 用 static struct io_uring *ring 指针
-新增 int m_uring_state 成员追踪当前 pending 操作
+### Step 3 — 埋点扩展
+位置	调用
+webserver.cpp init()	MetricsCollector::set_config(port, trigmode, ...)
+timer() 中 add_timer 后	MetricsCollector::getInstance().record_timer_add()
+cb_func() 中	MetricsCollector::getInstance().record_timer_expire()
+sort_timer_lst::del_timer	MetricsCollector::getInstance().record_timer_remove()
 
-### Step 4 — lst_timer.h（依赖 Step 1）
+### Step 4 — 创建 5 个子页面
+文件	样式	内容
+root/mysql.html	深色主题卡片	3 个指标卡（活跃/空闲/最大）+ 连接池利用率进度条
+root/threadpool.html	同上	线程数 + 队列堆积 + Proactor/Reactor 模式
+root/timer.html	同上	活跃定时器计数 + 超时累计
+root/log.html	同上	异步/同步模式 + 日志路径 + 行数切分
+root/config.html	同上	全部参数表格（PORT/模式/线程/SQL/linger 等）
+每个页面有「返回 Dashboard」链接。
 
-Utils 类中 static int u_epollfd → 条件为 static struct io_uring *u_ring
-
----
-## Phase 3: 核心实现（最大改动）
-
-### Step 5 — webserver.cpp（依赖 Step 2-4）
-
-构造函数：#if IO_URING 下不创建 epollfd
-析构函数：添加 io_uring_queue_exit(&ring)
-eventListen() 重写：io_uring_queue_init(256) 替换 epoll_create，不调用 addfd()，改为提交初始 SQEs（accept + signal_recv + timeout）
-eventLoop() 重写：io_uring_submit_and_wait 替换 epoll_wait，io_uring_for_each_cqe 遍历，用 cqe→user_data 编码分派到对应处理逻辑
-dealclientdata() / dealwithread() / dealwithwrite()：#if !IO_URING 包裹
-
-### Step 6 — http_conn.cpp（依赖 Step 3, 5）
-
-addfd() / removefd() / modfd()：#if !IO_URING 包裹
-read_once()：io_uring 模式改为 read_done(int bytes) —— recv 已由内核完成，直接取 m_read_buf 即可
-write()：io_uring 模式改为检查 CQE 的 res 字段更新发送进度，残留数据重新提交 writev SQE
-close_conn()：io_uring 模式用 io_uring_prep_close() 提交关闭
-
-### Step 7 — lst_timer.cpp（依赖 Step 4, 5）
-
-Utils::addfd()：#if !IO_URING 包裹
-cb_func()：epoll 路径的 epoll_ctl(EPOLL_CTL_DEL) 条件化
-timer_handler()：io_uring 模式移除 alarm() 调用
+### Step 5 — 更新 dashboard.html
+在技术栈卡片下方添加 5 个导航按钮，链接到各子页面。
 
 ---
-## Phase 4: 入口
-
-### Step 8 — main.cpp — 无改动，入口不变
+完整改动文件清单
+文件	改动量	说明
+sql_connection_pool.h + .cpp	~15 行	PoolStats + GetStats()
+threadpool.h	~10 行	TPoolStats + GetStats()
+log/log.h + .cpp	~10 行	GetInfo()
+timer/lst_timer.h + .cpp	~8 行	size()
+utils/metrics.h	~30 行	timer 计数 + config
+http/http_conn.cpp	~80 行	5 个 API 路由
+webserver.cpp	~10 行	config 埋点 + timer 埋点
+root/mysql.html	新建 ~180 行	MySQL 看板
+root/threadpool.html	新建 ~180 行	线程池看板
+root/timer.html	新建 ~150 行	定时器看板
+root/log.html	新建 ~150 行	日志看板
+root/config.html	新建 ~200 行	配置参数
+root/dashboard.html	~15 行	导航按钮
