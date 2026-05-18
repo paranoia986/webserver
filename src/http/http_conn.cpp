@@ -191,6 +191,10 @@ void http_conn::init()
     timer_flag = 0;
     improv = 0;
 
+    m_range_start = 0;
+    m_range_end   = -1;
+    m_has_range   = false;
+
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
     memset(m_real_file, '\0', FILENAME_LEN);
@@ -357,6 +361,23 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
         text += 5;
         text += strspn(text, " \t");
         m_host = text;
+    }
+    else if (strncasecmp(text, "Range:", 6) == 0)
+    {
+        // 解析 Range: bytes=X-Y 或 bytes=X-
+        text += 6;
+        text += strspn(text, " \t");
+        if (strncasecmp(text, "bytes=", 6) == 0)
+        {
+            text += 6;
+            m_range_start = atol(text);
+            char *dash = strchr(text, '-');
+            if (dash && dash[1] != '\0')
+                m_range_end = atol(dash + 1);
+            else
+                m_range_end = -1;   // 到文件末尾
+            m_has_range = true;
+        }
     }
     else
     {
@@ -843,10 +864,37 @@ bool http_conn::add_content_length(int content_len)
 {
     return add_response("Content-Length:%d\r\n", content_len);
 }
+
 bool http_conn::add_content_type()
 {
-    return add_response("Content-Type:%s\r\n", "text/html");
+    // 判断请求的文件后缀，返回正确的 Content-Type
+    if (strstr(m_real_file, ".html")) {
+        return add_response("Content-Type:%s\r\n", "text/html; charset=utf-8");
+    } 
+    else if (strstr(m_real_file, ".mp4")) {
+        return add_response("Content-Type:%s\r\n", "video/mp4");
+    } 
+    else if (strstr(m_real_file, ".jpg") || strstr(m_real_file, ".jpeg")) {
+        return add_response("Content-Type:%s\r\n", "image/jpeg");
+    } 
+    else if (strstr(m_real_file, ".png")) {
+        return add_response("Content-Type:%s\r\n", "image/png");
+    }
+    else if (strstr(m_real_file, ".gif")) {
+        return add_response("Content-Type:%s\r\n", "image/gif");
+    }
+    else if (strstr(m_real_file, ".css")) {
+        return add_response("Content-Type:%s\r\n", "text/css");
+    }
+    else if (strstr(m_real_file, ".js")) {
+        return add_response("Content-Type:%s\r\n", "application/javascript");
+    }
+    // 如果都不匹配，默认作为二进制流下载
+    else {
+        return add_response("Content-Type:%s\r\n", "application/octet-stream");
+    }
 }
+
 bool http_conn::add_linger()
 {
     return add_response("Connection:%s\r\n", (m_linger == true) ? "keep-alive" : "close");
@@ -889,6 +937,34 @@ bool http_conn::process_write(HTTP_CODE ret)
     }
     case FILE_REQUEST:
     {
+        if (m_has_range)
+        {
+            // ── HTTP 206 Partial Content ──
+            long file_size   = m_file_stat.st_size;
+            if (m_range_end == -1 || m_range_end >= file_size)
+                m_range_end = file_size - 1;
+            long content_len  = m_range_end - m_range_start + 1;
+
+            int header_len = snprintf(m_write_buf, WRITE_BUFFER_SIZE - 1,
+                "HTTP/1.1 206 Partial Content\r\n"
+                "Content-Range: bytes %ld-%ld/%ld\r\n"
+                "Accept-Ranges: bytes\r\n",
+                m_range_start, m_range_end, file_size);
+            m_write_idx = header_len;
+            add_content_type();
+            add_response("Content-Length: %ld\r\n", content_len);
+            add_blank_line();
+
+            // 响应头 → m_iv[0]，文件 Range 数据 → m_iv[1]
+            m_iv[0].iov_base = m_write_buf;
+            m_iv[0].iov_len  = static_cast<size_t>(m_write_idx);
+            m_iv[1].iov_base = m_file_address + m_range_start;
+            m_iv[1].iov_len  = static_cast<size_t>(content_len);
+            m_iv_count       = 2;
+            bytes_to_send    = m_write_idx + content_len;
+            return true;
+        }
+
         add_status_line(200, ok_200_title);
         if (m_file_stat.st_size != 0)
         {

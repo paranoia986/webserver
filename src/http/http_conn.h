@@ -170,6 +170,11 @@ private:
     int bytes_have_send;
     char *doc_root;
 
+    // Range 请求支持
+    long m_range_start;
+    long m_range_end;
+    bool m_has_range;
+
     map<string, string> m_users;
     int m_TRIGMode;
     int m_close_log;
